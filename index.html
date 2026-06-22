@@ -765,7 +765,7 @@ function ProjectsOverview() {
 //  PROJECT EDITOR
 // ═════════════════════════════════════════════════════════
 function ProjectEditor({ projectId }) {
-  const { projects, updateProject, deleteProject, setView } = useContext(AppContext);
+  const { projects, users, updateProject, deleteProject, setView } = useContext(AppContext);
   const project = projects.find(p => p.id === projectId);
   const editorRef = useRef(null);
   const saveTimer = useRef(null);
