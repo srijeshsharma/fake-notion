@@ -783,11 +783,11 @@ function ProjectEditor({ projectId }) {
     setEmoji(project.emoji || "📝");
   }, [project?.title, project?.emoji]); // eslint-disable-line
 
-  // Real-time sync: content updates from Firestore only when editor isn't focused
-  // (avoids clobbering in-progress typing from the local user)
+  // Real-time sync: apply remote content unless user typed in the last 1.5s
   useEffect(() => {
     if (!project || !editorRef.current) return;
-    if (document.activeElement !== editorRef.current) {
+    const isTypingNow = Date.now() - lastTyped.current < 1500;
+    if (!isTypingNow) {
       editorRef.current.innerHTML = project.content || "";
     }
   }, [project?.content]); // eslint-disable-line
@@ -820,6 +820,7 @@ function ProjectEditor({ projectId }) {
   }, []);
 
   const forceTimer = useRef(null);
+  const lastTyped = useRef(0);
 
   function doSave(overrides = {}) {
     updateProject(projectId, {
@@ -950,7 +951,7 @@ function ProjectEditor({ projectId }) {
                suppressContentEditableWarning
                data-placeholder="Start writing… or type / for commands"
                className="notion-editor outline-none min-h-[400px]"
-               onInput={save}
+               onInput={() => { lastTyped.current = Date.now(); save(); }}
                onKeyDown={e => {
                  if ((e.metaKey || e.ctrlKey) && e.key === 'b') { e.preventDefault(); fmt('bold'); }
                  if ((e.metaKey || e.ctrlKey) && e.key === 'i') { e.preventDefault(); fmt('italic'); }
