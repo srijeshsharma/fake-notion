@@ -169,6 +169,12 @@ function isOverdue(d) {
   const today = new Date(); today.setHours(0,0,0,0);
   return new Date(d + "T00:00:00") < today;
 }
+function daysUntilDue(d) {
+  if (!d) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const due = new Date(d + "T00:00:00");
+  return Math.round((due - today) / 86400000);
+}
 
 // ── Avatar ──────────────────────────────────────────────
 function Avatar({ name, size = "sm" }) {
@@ -381,12 +387,20 @@ function CardInner({ card, users }) {
               {card.priority}
             </span>
           )}
-          {card.dueDate && (
-            <span className={`text-[11px] flex items-center gap-1 ${isOverdue(card.dueDate) ? "text-red-500 font-semibold" : "text-notion-muted"}`}>
-              <Icon d={IC.calendar} size={11} />
-              {fmtDate(card.dueDate)}
-            </span>
-          )}
+          {card.dueDate && (() => {
+            const d = daysUntilDue(card.dueDate);
+            const cls = d < 0   ? "text-red-500 font-semibold"
+                      : d === 0 ? "text-red-500 font-semibold"
+                      : d <= 2  ? "text-orange-500 font-medium"
+                      : d <= 4  ? "text-yellow-600 dark:text-yellow-400 font-medium"
+                      : "text-notion-muted";
+            return (
+              <span className={`text-[11px] flex items-center gap-1 ${cls}`}>
+                <Icon d={IC.calendar} size={11} />
+                {d === 0 ? "Today" : d === 1 ? "Tomorrow" : fmtDate(card.dueDate)}
+              </span>
+            );
+          })()}
         </div>
         {assignee && <Avatar name={assignee.name} size="sm" />}
       </div>
@@ -432,9 +446,21 @@ function DragOverlay({ drag }) {
 function CardItem({ card, onEdit, onDragStart }) {
   const { users, activeDragId } = useContext(AppContext);
   const isDragging = activeDragId === card.id;
+  const days = daysUntilDue(card.dueDate);
+
+  // Red shading tiers: overdue, today/tomorrow, within 3 days
+  const dueTint = card.dueDate
+    ? days < 0   ? "border-red-300 bg-red-50/60 dark:border-red-900 dark:bg-red-950/30"
+    : days === 0 ? "border-red-300 bg-red-50/50 dark:border-red-900 dark:bg-red-950/25"
+    : days <= 2  ? "border-orange-200 bg-orange-50/50 dark:border-orange-900/60 dark:bg-orange-950/20"
+    : days <= 4  ? "border-yellow-200 bg-yellow-50/30 dark:border-yellow-900/40 dark:bg-yellow-950/10"
+    : ""
+    : "";
 
   function handleMouseDown(e) {
     if (e.button !== 0) return;
+    // Don't start drag if clicking the edit button
+    if (e.target.closest('[data-edit-btn]')) return;
     e.preventDefault();
     const rect = e.currentTarget.getBoundingClientRect();
     onDragStart({
@@ -451,15 +477,24 @@ function CardItem({ card, onEdit, onDragStart }) {
 
   return (
     <div
-      className={`group relative bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-gray-600 transition-all select-none
+      className={`group relative border rounded-2xl shadow-sm hover:shadow-md transition-all select-none
+        ${dueTint || "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"}
         ${isDragging ? "opacity-30 pointer-events-none" : "cursor-grab active:cursor-grabbing"}`}
       onMouseDown={handleMouseDown}
-      onClick={() => { if (!isDragging) onEdit(card); }}
     >
       <div className="hover-handle absolute -left-5 top-1/2 -translate-y-1/2 p-0.5 text-notion-muted cursor-grab">
         <Icon d={IC.grip} size={14} />
       </div>
-      <div className="px-3 py-2.5">
+      {/* Pencil edit button — always visible top-right */}
+      <button
+        data-edit-btn="true"
+        onClick={e => { e.stopPropagation(); onEdit(card); }}
+        className="absolute top-2 right-2 p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-gray-100 dark:hover:bg-gray-700 text-notion-muted hover:text-notion-text dark:hover:text-notion-text-dark transition-all z-10"
+        title="Edit card"
+      >
+        <Icon d={IC.edit} size={13} />
+      </button>
+      <div className="px-3 py-2.5 pr-7">
         <CardInner card={card} users={users} />
       </div>
     </div>
@@ -728,17 +763,33 @@ function ProjectEditor({ projectId }) {
   const saveTimer = useRef(null);
   const [title, setTitle] = useState("");
   const [emoji, setEmoji] = useState("📝");
-  const initialized = useRef(false);
   const [activeFormats, setActiveFormats] = useState({});
 
-  // Load on mount / project change
+  // Initial load when switching projects
   useEffect(() => {
-    initialized.current = false;
-    if (project) {
-      setTitle(project.title || "");
-      setEmoji(project.emoji || "📝");
+    if (!project) return;
+    setTitle(project.title || "");
+    setEmoji(project.emoji || "📝");
+    if (editorRef.current) {
+      editorRef.current.innerHTML = project.content || "";
     }
-  }, [projectId]);
+  }, [projectId]); // eslint-disable-line
+
+  // Real-time sync: title + emoji always update from Firestore
+  useEffect(() => {
+    if (!project) return;
+    setTitle(project.title || "");
+    setEmoji(project.emoji || "📝");
+  }, [project?.title, project?.emoji]); // eslint-disable-line
+
+  // Real-time sync: content updates from Firestore only when editor isn't focused
+  // (avoids clobbering in-progress typing from the local user)
+  useEffect(() => {
+    if (!project || !editorRef.current) return;
+    if (document.activeElement !== editorRef.current) {
+      editorRef.current.innerHTML = project.content || "";
+    }
+  }, [project?.content]); // eslint-disable-line
 
   // Track active formatting whenever selection changes
   useEffect(() => {
@@ -766,14 +817,6 @@ function ProjectEditor({ projectId }) {
     document.addEventListener('selectionchange', updateFormats);
     return () => document.removeEventListener('selectionchange', updateFormats);
   }, []);
-
-  // Set editor HTML after render
-  useEffect(() => {
-    if (!initialized.current && editorRef.current && project) {
-      editorRef.current.innerHTML = project.content || "";
-      initialized.current = true;
-    }
-  });
 
   function save(overrides = {}) {
     clearTimeout(saveTimer.current);
