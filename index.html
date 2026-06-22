@@ -828,7 +828,7 @@ function ProjectEditor({ projectId }) {
         content: editorRef.current?.innerHTML || "",
         updatedAt: new Date().toISOString(),
       });
-    }, 600);
+    }, 300);
   }
 
   function fmt(cmd, val = null) {
