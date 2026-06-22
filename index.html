@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fake Notion</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'] },
+          colors: {
+            notion: {
+              bg: '#ffffff',
+              'bg-dark': '#191919',
+              sidebar: '#f7f7f5',
+              'sidebar-dark': '#202020',
+              'sidebar-hover': '#ebebea',
+              'sidebar-hover-dark': '#2f2f2f',
+              border: '#e8e8e5',
+              'border-dark': '#2f2f2f',
+              text: '#37352f',
+              'text-dark': '#e8e8e3',
+              muted: '#9b9a97',
+              accent: '#2eaadc',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    * { scrollbar-width: thin; scrollbar-color: #d1d1d1 transparent; }
+    *::-webkit-scrollbar { width: 6px; height: 6px; }
+    *::-webkit-scrollbar-thumb { background: #d1d1d1; border-radius: 3px; }
+    .dark *::-webkit-scrollbar-thumb { background: #444; }
+    [data-dragging="true"] { opacity: 0.4; cursor: grabbing; }
+    .column-drop-active { background: rgba(46,170,220,0.04); }
+    .slash-menu { animation: slideUp 0.12s ease; }
+    @keyframes slideUp { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform: translateY(0); } }
+    .modal-enter { animation: modalIn 0.15s ease; }
+    @keyframes modalIn { from { opacity:0; transform: scale(0.97); } to { opacity:1; transform: scale(1); } }
+    .sidebar-transition { transition: width 0.2s ease, opacity 0.15s ease; }
+    .hover-handle { opacity: 0; transition: opacity 0.1s; }
+    .group:hover .hover-handle, .group\/card:hover .hover-handle { opacity: 1; }
+  </style>
+</head>
+<body class="bg-white dark:bg-notion-bg-dark">
+  <div id="root"></div>
+
+<script id="app-source" type="text/babel-source">
+const { useState, useEffect, useRef, useCallback, createContext, useContext } = React;
+
+// ── Firebase Config ─────────────────────────────────────
+const FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyAQzMmpNwwmsLpes17SKnm3I0tZPzknXSI",
+  authDomain:        "fake-notion-99ef6.firebaseapp.com",
+  projectId:         "fake-notion-99ef6",
+  storageBucket:     "fake-notion-99ef6.firebasestorage.app",
+  messagingSenderId: "707999916308",
+  appId:             "1:707999916308:web:da48f037a515b1fe68a201",
+};
+
+function isConfigured() {
+  return FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey !== "YOUR_API_KEY";
+}
+
+let db = null;
+if (isConfigured()) {
+  firebase.initializeApp(FIREBASE_CONFIG);
+  db = firebase.firestore();
+}
+
+// ── Constants ───────────────────────────────────────────
+const COLUMNS = [
+  { id: "not-started",      label: "Not Started",      emoji: "\u{1F4CB}", color: "bg-gray-400" },
+  { id: "working-on-it",    label: "Working On It",     emoji: "\u{1F528}", color: "bg-amber-400" },
+  { id: "near-completion",  label: "Near Completion",   emoji: "\u{1F3C1}", color: "bg-blue-400" },
+  { id: "complete",         label: "Complete",          emoji: "✅",    color: "bg-emerald-400" },
+];
+
+const PRIORITY_COLORS = {
+  low:    { bg: "bg-gray-100 dark:bg-gray-800", text: "text-gray-600 dark:text-gray-400", dot: "bg-gray-400" },
+  medium: { bg: "bg-amber-50 dark:bg-amber-950/40", text: "text-amber-700 dark:text-amber-400", dot: "bg-amber-400" },
+  high:   { bg: "bg-red-50 dark:bg-red-950/40", text: "text-red-700 dark:text-red-400", dot: "bg-red-400" },
+};
+
+const USER_COLORS = [
+  "#6366f1","#ec4899","#14b8a6","#f59e0b","#8b5cf6","#ef4444","#06b6d4","#84cc16",
+];
+
+const AppContext = createContext();
+
+// ── Icons ───────────────────────────────────────────────
+function Icon({ d, size = 16, className = "" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d={d} />
+    </svg>
+  );
+}
+
+const IC = {
+  plus:        "M12 5v14M5 12h14",
+  search:      "M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z",
+  chevDown:    "M6 9l6 6 6-6",
+  chevRight:   "M9 18l6-6-6-6",
+  settings:    "M12 8a4 4 0 100 8 4 4 0 000-8z",
+  sun:         "M12 3v1m0 16v1m-9-9h1m16 0h1m-2.636-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m11.314 11.314l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z",
+  moon:        "M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z",
+  x:           "M18 6L6 18M6 6l12 12",
+  grip:        "M9 5h.01M9 12h.01M9 19h.01M15 5h.01M15 12h.01M15 19h.01",
+  trash:       "M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14",
+  calendar:    "M3 8h18M8 3v4M16 3v4M3 8v10a2 2 0 002 2h14a2 2 0 002-2V8",
+  sidebar:     "M3 3h18v18H3zM9 3v18",
+  board:       "M3 3h6v8H3zM3 13h6v8H3zM11 3h6v5H11zM11 10h6v11H11zM19 3h2v7h-2zM19 12h2v9h-2z",
+  userPlus:    "M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M12.5 7a4 4 0 100-8 4 4 0 000 8zM20 8v6M23 11h-6",
+};
+
+// ── Helpers ─────────────────────────────────────────────
+function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function getInitials(name) {
+  return name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
+}
+function getUserColor(name) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  return USER_COLORS[Math.abs(hash) % USER_COLORS.length];
+}
+function fmtDate(d) {
+  if (!d) return "";
+  return new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+function isOverdue(d) {
+  if (!d) return false;
+  const today = new Date(); today.setHours(0,0,0,0);
+  return new Date(d + "T00:00:00") < today;
+}
+
+// ── Avatar ──────────────────────────────────────────────
+function Avatar({ name, size = "sm" }) {
+  const sizes = { xs: "w-5 h-5 text-[9px]", sm: "w-6 h-6 text-[10px]", md: "w-7 h-7 text-xs" };
+  return (
+    <div className={`${sizes[size]} rounded-full flex items-center justify-center text-white font-semibold flex-shrink-0 shadow-sm`}
+         style={{ background: getUserColor(name) }} title={name}>
+      {getInitials(name)}
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════
+//  SIDEBAR
+// ═════════════════════════════════════════════════════════
+function Sidebar({ collapsed, onToggle }) {
+  const { users, addUser, removeUser, darkMode, setDarkMode } = useContext(AppContext);
+  const [showTeam, setShowTeam] = useState(true);
+  const [newName, setNewName] = useState("");
+
+  function handleAddUser(e) {
+    e.preventDefault();
+    const t = newName.trim();
+    if (t && !users.find(u => u.name.toLowerCase() === t.toLowerCase())) {
+      addUser(t);
+      setNewName("");
+    }
+  }
+
+  if (collapsed) {
+    return (
+      <div className="w-10 flex-shrink-0 flex flex-col items-center py-3 gap-2 border-r border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-950 sidebar-transition">
+        <button onClick={onToggle} className="p-1.5 rounded hover:bg-notion-sidebar-hover dark:hover:bg-notion-sidebar-hover-dark text-notion-muted">
+          <Icon d={IC.sidebar} size={16} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-60 flex-shrink-0 flex flex-col border-r border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-950 sidebar-transition overflow-hidden">
+      {/* Workspace header */}
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-200 dark:border-gray-800">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-5 h-5 rounded bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">F</div>
+          <span className="font-semibold text-sm text-notion-text dark:text-notion-text-dark truncate">Fake Notion</span>
+        </div>
+        <button onClick={onToggle} className="p-1 rounded hover:bg-notion-sidebar-hover dark:hover:bg-notion-sidebar-hover-dark text-notion-muted">
+          <Icon d={IC.sidebar} size={14} />
+        </button>
+      </div>
+
+      {/* Nav */}
+      <div className="flex-1 overflow-y-auto py-2 px-1.5">
+        <SidebarItem icon={IC.board} label="Board" active />
+        <SidebarItem icon={IC.search} label="Search" />
+
+        {/* Team */}
+        <div className="mt-5 mb-1 px-2">
+          <button onClick={() => setShowTeam(!showTeam)}
+                  className="flex items-center justify-between w-full text-[11px] font-semibold uppercase tracking-wider text-notion-muted hover:text-notion-text dark:hover:text-notion-text-dark">
+            <span>Team</span>
+            <Icon d={showTeam ? IC.chevDown : IC.chevRight} size={12} />
+          </button>
+        </div>
+
+        {showTeam && (
+          <div className="px-1 mb-2">
+            {users.length === 0 && (
+              <p className="text-xs text-notion-muted px-2 py-2 italic">No members yet</p>
+            )}
+            {users.map(u => (
+              <div key={u.id} className="group flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-notion-sidebar-hover dark:hover:bg-notion-sidebar-hover-dark">
+                <Avatar name={u.name} size="xs" />
+                <span className="text-sm text-notion-text dark:text-notion-text-dark truncate flex-1">{u.name}</span>
+                <button onClick={() => removeUser(u.id)}
+                        className="hover-handle p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-notion-muted hover:text-red-500">
+                  <Icon d={IC.x} size={12} />
+                </button>
+              </div>
+            ))}
+            <form onSubmit={handleAddUser} className="flex items-center gap-1.5 mt-1.5 px-1">
+              <input value={newName} onChange={e => setNewName(e.target.value)}
+                     placeholder="Add member…"
+                     className="flex-1 text-sm px-2 py-1 rounded-md border border-notion-border dark:border-notion-border-dark bg-white dark:bg-notion-bg-dark text-notion-text dark:text-notion-text-dark placeholder-notion-muted outline-none focus:border-notion-accent" />
+              <button type="submit" className="p-1 rounded-md hover:bg-notion-sidebar-hover dark:hover:bg-notion-sidebar-hover-dark text-notion-muted hover:text-notion-accent">
+                <Icon d={IC.userPlus} size={14} />
+              </button>
+            </form>
+          </div>
+        )}
+
+        <SidebarItem icon={IC.settings} label="Settings" />
+      </div>
+
+      {/* Footer */}
+      <div className="px-3 py-2.5 border-t border-gray-200 dark:border-gray-800">
+        <p className="text-[11px] text-gray-400 dark:text-gray-600 px-1">Fake Notion · local</p>
+      </div>
+    </div>
+  );
+}
+
+function SidebarItem({ icon, label, active = false }) {
+  return (
+    <div className={`flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors
+      ${active
+        ? "bg-notion-sidebar-hover dark:bg-notion-sidebar-hover-dark text-notion-text dark:text-notion-text-dark font-medium"
+        : "text-notion-muted hover:bg-notion-sidebar-hover dark:hover:bg-notion-sidebar-hover-dark hover:text-notion-text dark:hover:text-notion-text-dark"
+      }`}>
+      <Icon d={icon} size={15} />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════
+//  THEME TOGGLE (pill switch)
+// ═════════════════════════════════════════════════════════
+function ThemeToggle() {
+  const { darkMode, setDarkMode } = useContext(AppContext);
+  return (
+    <button
+      onClick={() => setDarkMode(!darkMode)}
+      title={darkMode ? "Switch to light" : "Switch to dark"}
+      className={`relative flex items-center w-14 h-7 rounded-full border-2 transition-colors duration-200 focus:outline-none
+        ${darkMode
+          ? "bg-gray-800 border-gray-600"
+          : "bg-gray-200 border-gray-300"
+        }`}
+    >
+      {/* Track labels */}
+      <span className={`absolute left-1.5 text-[10px] font-bold transition-opacity duration-200 select-none
+        ${darkMode ? "opacity-0" : "opacity-100 text-gray-500"}`}>☀</span>
+      <span className={`absolute right-1.5 text-[10px] font-bold transition-opacity duration-200 select-none
+        ${darkMode ? "opacity-100 text-gray-400" : "opacity-0"}`}>☽</span>
+      {/* Knob */}
+      <span className={`absolute w-5 h-5 rounded-full shadow-md transition-transform duration-200
+        ${darkMode
+          ? "translate-x-7 bg-gray-200"
+          : "translate-x-0.5 bg-white"
+        }`} />
+    </button>
+  );
+}
+
+// ═════════════════════════════════════════════════════════
+//  TOP BAR
+// ═════════════════════════════════════════════════════════
+function TopBar() {
+  const { cards } = useContext(AppContext);
+  const total = cards.length;
+  const done = cards.filter(c => c.status === "complete").length;
+
+  return (
+    <div className="h-11 flex items-center justify-between px-4 border-b border-gray-200 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/90 backdrop-blur-sm flex-shrink-0">
+      <div className="flex items-center gap-1.5 text-sm text-notion-muted">
+        <span className="px-1.5 py-0.5 rounded cursor-default">Fake Notion</span>
+        <span className="text-gray-300 dark:text-gray-700">/</span>
+        <span className="text-notion-text dark:text-notion-text-dark font-medium px-1.5 py-0.5">Board</span>
+      </div>
+      <div className="flex items-center gap-4">
+        {total > 0 && (
+          <span className="text-xs text-notion-muted bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full">{done}/{total} done</span>
+        )}
+        <ThemeToggle />
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════
+//  CARD
+// ═════════════════════════════════════════════════════════
+function CardItem({ card, onEdit }) {
+  const { users } = useContext(AppContext);
+  const assignee = users.find(u => u.id === card.assignedTo);
+
+  function handleDragStart(e) {
+    e.dataTransfer.setData("text/plain", card.id);
+    e.dataTransfer.effectAllowed = "move";
+    e.target.setAttribute("data-dragging", "true");
+  }
+  function handleDragEnd(e) {
+    e.target.removeAttribute("data-dragging");
+  }
+
+  const prio = PRIORITY_COLORS[card.priority] || PRIORITY_COLORS.medium;
+
+  return (
+    <div className="group relative bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-gray-600 transition-all cursor-grab active:cursor-grabbing"
+         draggable="true" onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <div className="hover-handle absolute -left-5 top-1/2 -translate-y-1/2 p-0.5 text-notion-muted cursor-grab">
+        <Icon d={IC.grip} size={14} />
+      </div>
+
+      <div className="px-3 py-2.5 cursor-pointer" onClick={() => onEdit(card)}>
+        <p className="text-sm font-medium text-notion-text dark:text-notion-text-dark leading-snug mb-1.5">{card.title}</p>
+
+        {card.description && (
+          <p className="text-xs text-notion-muted leading-relaxed mb-2" style={{display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden'}}>{card.description}</p>
+        )}
+
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {card.priority && (
+              <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${prio.bg} ${prio.text}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${prio.dot}`}></span>
+                {card.priority}
+              </span>
+            )}
+            {card.dueDate && (
+              <span className={`text-[11px] flex items-center gap-1 ${isOverdue(card.dueDate) ? "text-red-500 font-semibold" : "text-notion-muted"}`}>
+                <Icon d={IC.calendar} size={11} />
+                {fmtDate(card.dueDate)}
+              </span>
+            )}
+          </div>
+          {assignee && <Avatar name={assignee.name} size="sm" />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════
+//  COLUMN
+// ═════════════════════════════════════════════════════════
+function Column({ column, cards, onEditCard, onAddCard }) {
+  const [dragOver, setDragOver] = useState(false);
+  const { moveCard } = useContext(AppContext);
+
+  function handleDragOver(e) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOver(true); }
+  function handleDragLeave(e) { if (!e.currentTarget.contains(e.relatedTarget)) setDragOver(false); }
+  function handleDrop(e) {
+    e.preventDefault(); setDragOver(false);
+    const cardId = e.dataTransfer.getData("text/plain");
+    if (cardId) moveCard(cardId, column.id);
+  }
+
+  return (
+    <div className={`flex flex-col min-w-[272px] max-w-[320px] flex-1 rounded-xl transition-colors ${dragOver ? "column-drop-active" : ""}`}
+         onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+      <div className="flex items-center gap-2 px-2 py-2 mb-1">
+        <span className={`w-2.5 h-2.5 rounded-full ${column.color}`}></span>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-notion-muted flex-1">{column.label}</h3>
+        <span className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 bg-gray-200 dark:bg-gray-800 rounded-full px-2 py-0.5">{cards.length}</span>
+        <button onClick={() => onAddCard(column.id)}
+                className="p-0.5 rounded hover:bg-notion-sidebar-hover dark:hover:bg-notion-sidebar-hover-dark text-notion-muted hover:text-notion-text dark:hover:text-notion-text-dark transition-colors">
+          <Icon d={IC.plus} size={14} />
+        </button>
+      </div>
+
+      <div className="flex flex-col gap-2 px-1 min-h-[60px] flex-1 pl-6">
+        {cards.length === 0 && (
+          <div className="flex items-center justify-center py-8 text-xs text-gray-400 dark:text-gray-600 border border-dashed border-gray-300 dark:border-gray-700 rounded-lg bg-gray-50/50 dark:bg-gray-900/20">
+            Drop cards here
+          </div>
+        )}
+        {cards.map(card => <CardItem key={card.id} card={card} onEdit={onEditCard} />)}
+      </div>
+
+      <button onClick={() => onAddCard(column.id)}
+              className="flex items-center gap-1.5 mx-1 ml-6 mt-2 mb-1 px-2 py-2 rounded-lg text-sm text-gray-400 dark:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-600 dark:hover:text-gray-400 transition-colors">
+        <Icon d={IC.plus} size={14} />
+        <span>New</span>
+      </button>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════
+//  CARD MODAL
+// ═════════════════════════════════════════════════════════
+function CardModal({ card, defaultStatus, onClose, onSave, onDelete }) {
+  const { users } = useContext(AppContext);
+  const isEdit = !!card;
+  const [title, setTitle] = useState(card?.title || "");
+  const [description, setDescription] = useState(card?.description || "");
+  const [assignedTo, setAssignedTo] = useState(card?.assignedTo || "");
+  const [priority, setPriority] = useState(card?.priority || "medium");
+  const [status, setStatus] = useState(card?.status || defaultStatus || "not-started");
+  const [dueDate, setDueDate] = useState(card?.dueDate || "");
+  const titleRef = useRef(null);
+  const [showSlash, setShowSlash] = useState(false);
+
+  useEffect(() => { titleRef.current?.focus(); }, []);
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    if (!title.trim()) return;
+    onSave({
+      ...(card || {}),
+      id: card?.id || genId(),
+      title: title.trim(),
+      description: description.trim(),
+      assignedTo, priority, status, dueDate,
+    });
+  }
+
+  function handleDescKeyDown(e) {
+    if (e.key === "/") { setShowSlash(true); }
+    else if (e.key === "Escape") { setShowSlash(false); }
+    else { setShowSlash(false); }
+  }
+
+  function insertSlashItem(text) {
+    setDescription(prev => prev.replace(/\/$/, "") + text);
+    setShowSlash(false);
+  }
+
+  const slashItems = [
+    { label: "Heading", icon: "H", insert: "## " },
+    { label: "To-do", icon: "☐", insert: "[ ] " },
+    { label: "Bullet list", icon: "•", insert: "• " },
+    { label: "Divider", icon: "—", insert: "\n---\n" },
+    { label: "Mention user", icon: "@", insert: "@" },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px] p-4"
+         onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal-enter bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div className="flex items-center justify-between px-6 pt-5 pb-3">
+          <h2 className="text-lg font-semibold text-notion-text dark:text-notion-text-dark">
+            {isEdit ? "Edit card" : "New card"}
+          </h2>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-notion-sidebar-hover dark:hover:bg-notion-sidebar-hover-dark text-notion-muted">
+            <Icon d={IC.x} size={16} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="px-6 pb-6">
+          <input ref={titleRef} value={title} onChange={e => setTitle(e.target.value)}
+                 placeholder="Untitled"
+                 className="w-full text-xl font-semibold text-notion-text dark:text-notion-text-dark placeholder-notion-muted bg-transparent outline-none py-1 mb-3" />
+
+          <div className="relative mb-4">
+            <textarea value={description} onChange={e => setDescription(e.target.value)}
+                      onKeyDown={handleDescKeyDown}
+                      placeholder="Add a description… (type / for commands)"
+                      rows={3}
+                      className="w-full text-sm text-notion-text dark:text-notion-text-dark placeholder-notion-muted bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2.5 outline-none focus:border-notion-accent resize-y leading-relaxed" />
+            {showSlash && (
+              <div className="slash-menu absolute left-0 bottom-full mb-1 bg-white dark:bg-notion-sidebar-dark border border-notion-border dark:border-notion-border-dark rounded-lg shadow-xl py-1 w-52 z-10">
+                <div className="px-3 py-1 text-[10px] font-semibold uppercase text-notion-muted tracking-wider">Blocks</div>
+                {slashItems.map(item => (
+                  <button key={item.label} type="button"
+                          onClick={() => insertSlashItem(item.insert)}
+                          className="flex items-center gap-2.5 w-full px-3 py-1.5 text-sm text-notion-text dark:text-notion-text-dark hover:bg-notion-sidebar-hover dark:hover:bg-notion-sidebar-hover-dark text-left">
+                    <span className="w-6 h-6 flex items-center justify-center rounded bg-notion-sidebar dark:bg-notion-bg-dark text-xs font-medium border border-notion-border dark:border-notion-border-dark">{item.icon}</span>
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div>
+              <label className="text-[11px] font-semibold uppercase tracking-wide text-notion-muted mb-1 block">Assigned to</label>
+              <select value={assignedTo} onChange={e => setAssignedTo(e.target.value)}
+                      className="w-full text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-notion-text dark:text-notion-text-dark rounded-lg px-2.5 py-2 outline-none focus:border-notion-accent">
+                <option value="">Unassigned</option>
+                {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold uppercase tracking-wide text-notion-muted mb-1 block">Priority</label>
+              <select value={priority} onChange={e => setPriority(e.target.value)}
+                      className="w-full text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-notion-text dark:text-notion-text-dark rounded-lg px-2.5 py-2 outline-none focus:border-notion-accent">
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold uppercase tracking-wide text-notion-muted mb-1 block">Status</label>
+              <select value={status} onChange={e => setStatus(e.target.value)}
+                      className="w-full text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-notion-text dark:text-notion-text-dark rounded-lg px-2.5 py-2 outline-none focus:border-notion-accent">
+                {COLUMNS.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold uppercase tracking-wide text-notion-muted mb-1 block">Due date</label>
+              <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
+                     className="w-full text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-notion-text dark:text-notion-text-dark rounded-lg px-2.5 py-2 outline-none focus:border-notion-accent" />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-800">
+            {isEdit ? (
+              <button type="button" onClick={() => onDelete(card.id)}
+                      className="text-sm text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 px-3 py-1.5 rounded-lg transition-colors font-medium">Delete</button>
+            ) : <div />}
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={onClose}
+                      className="text-sm text-notion-muted hover:text-notion-text dark:hover:text-notion-text-dark hover:bg-notion-sidebar-hover dark:hover:bg-notion-sidebar-hover-dark px-3 py-1.5 rounded-lg transition-colors font-medium">Cancel</button>
+              <button type="submit"
+                      className="text-sm font-medium bg-notion-text dark:bg-notion-text-dark text-white dark:text-notion-bg-dark px-4 py-1.5 rounded-lg hover:opacity-90 transition-opacity">
+                {isEdit ? "Save" : "Create"}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════
+//  CONFIG BANNER
+// ═════════════════════════════════════════════════════════
+function ConfigBanner() {
+  if (isConfigured()) return null;
+  return (
+    <div className="mx-6 mt-4 px-4 py-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl text-sm text-amber-800 dark:text-amber-300">
+      <strong>Local mode</strong> — Firebase not configured. Cards are stored in memory only.
+      Edit <code className="bg-amber-100 dark:bg-amber-900/40 px-1 py-0.5 rounded text-xs">FIREBASE_CONFIG</code> in <code className="bg-amber-100 dark:bg-amber-900/40 px-1 py-0.5 rounded text-xs">index.html</code> to persist data.
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════
+//  BOARD PAGE
+// ═════════════════════════════════════════════════════════
+function BoardPage() {
+  const { cards, saveCard, deleteCard } = useContext(AppContext);
+  const [modalState, setModalState] = useState(null);
+
+  function openNew(status) { setModalState({ defaultStatus: status }); }
+  function openEdit(card) { setModalState({ card }); }
+  function closeModal() { setModalState(null); }
+
+  function handleSave(cardData) { saveCard(cardData); closeModal(); }
+  function handleDelete(cardId) {
+    if (confirm("Delete this card?")) { deleteCard(cardId); closeModal(); }
+  }
+
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <TopBar />
+      <ConfigBanner />
+
+      <div className="px-10 pt-8 pb-4">
+        <div className="flex items-center gap-3 mb-1">
+          <span className="text-3xl">{"\u{1F4CB}"}</span>
+          <h1 className="text-3xl font-bold text-notion-text dark:text-notion-text-dark">Board</h1>
+        </div>
+        <p className="text-sm text-gray-400 dark:text-gray-600 ml-12">Drag cards between columns to update status.</p>
+      </div>
+
+      <div className="flex-1 overflow-x-auto px-6 pb-6 bg-gray-50/60 dark:bg-gray-950/60">
+        <div className="flex gap-4 min-h-full">
+          {COLUMNS.map(col => (
+            <Column key={col.id} column={col}
+                    cards={cards.filter(c => c.status === col.id)}
+                    onEditCard={openEdit}
+                    onAddCard={openNew} />
+          ))}
+        </div>
+      </div>
+
+      {modalState && (
+        <CardModal card={modalState.card} defaultStatus={modalState.defaultStatus}
+                   onClose={closeModal} onSave={handleSave} onDelete={handleDelete} />
+      )}
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════
+//  APP ROOT
+// ═════════════════════════════════════════════════════════
+function App() {
+  const [darkMode, setDarkMode] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [cards, setCards] = useState([]);
+  const [users, setUsers] = useState([]);
+
+  useEffect(() => {
+    if (!db) return;
+    const unsub1 = db.collection("cards").orderBy("createdAt", "asc")
+      .onSnapshot(snap => setCards(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const unsub2 = db.collection("users").orderBy("name", "asc")
+      .onSnapshot(snap => setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    return () => { unsub1(); unsub2(); };
+  }, []);
+
+  useEffect(() => { document.documentElement.classList.toggle("dark", darkMode); }, [darkMode]);
+
+  const saveCard = useCallback(async (cardData) => {
+    if (db) {
+      const { id, ...rest } = cardData;
+      const existing = cards.find(c => c.id === id);
+      if (existing) await db.collection("cards").doc(id).update({ ...rest, updatedAt: new Date().toISOString() });
+      else await db.collection("cards").add({ ...rest, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    } else {
+      setCards(prev => {
+        const idx = prev.findIndex(c => c.id === cardData.id);
+        if (idx !== -1) { const cp = [...prev]; cp[idx] = { ...cp[idx], ...cardData }; return cp; }
+        return [...prev, { ...cardData, createdAt: new Date().toISOString() }];
+      });
+    }
+  }, [cards]);
+
+  const deleteCard = useCallback(async (cardId) => {
+    if (db) await db.collection("cards").doc(cardId).delete();
+    else setCards(prev => prev.filter(c => c.id !== cardId));
+  }, []);
+
+  const moveCard = useCallback(async (cardId, newStatus) => {
+    if (db) await db.collection("cards").doc(cardId).update({ status: newStatus });
+    else setCards(prev => prev.map(c => c.id === cardId ? { ...c, status: newStatus } : c));
+  }, []);
+
+  const addUser = useCallback(async (name) => {
+    const user = { name, createdAt: new Date().toISOString() };
+    if (db) await db.collection("users").add(user);
+    else setUsers(prev => [...prev, { id: genId(), ...user }]);
+  }, []);
+
+  const removeUser = useCallback(async (userId) => {
+    if (db) await db.collection("users").doc(userId).delete();
+    else setUsers(prev => prev.filter(u => u.id !== userId));
+  }, []);
+
+  const ctx = { cards, users, darkMode, setDarkMode, saveCard, deleteCard, moveCard, addUser, removeUser };
+
+  return (
+    <AppContext.Provider value={ctx}>
+      <div className="h-screen flex bg-white dark:bg-notion-bg-dark font-sans">
+        <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+        <BoardPage />
+      </div>
+    </AppContext.Provider>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    var src = document.getElementById('app-source').textContent;
+    var out = Babel.transform(src, { presets: [['react', { runtime: 'classic' }], 'env'] });
+    eval(out.code);
+  });
+</script>
+</body>
+</html>
