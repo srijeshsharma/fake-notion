@@ -51,6 +51,7 @@
     .sidebar-transition { transition: width 0.2s ease, opacity 0.15s ease; }
     .hover-handle { opacity: 0; transition: opacity 0.1s; }
     .group:hover .hover-handle, .group\/card:hover .hover-handle { opacity: 1; }
+    body.dragging, body.dragging * { cursor: grabbing !important; }
   </style>
 </head>
 <body class="bg-white dark:bg-notion-bg-dark">
@@ -317,54 +318,105 @@ function TopBar() {
 }
 
 // ═════════════════════════════════════════════════════════
-//  CARD
+//  CARD INNER (shared by CardItem and drag clone)
 // ═════════════════════════════════════════════════════════
-function CardItem({ card, onEdit }) {
-  const { users } = useContext(AppContext);
+function CardInner({ card, users }) {
   const assignee = users.find(u => u.id === card.assignedTo);
-
-  function handleDragStart(e) {
-    e.dataTransfer.setData("text/plain", card.id);
-    e.dataTransfer.effectAllowed = "move";
-    e.target.setAttribute("data-dragging", "true");
-  }
-  function handleDragEnd(e) {
-    e.target.removeAttribute("data-dragging");
-  }
-
   const prio = PRIORITY_COLORS[card.priority] || PRIORITY_COLORS.medium;
+  return (
+    <>
+      <p className="text-sm font-medium text-notion-text dark:text-notion-text-dark leading-snug mb-1.5">{card.title}</p>
+      {card.description && (
+        <p className="text-xs text-notion-muted leading-relaxed mb-2" style={{display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>{card.description}</p>
+      )}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {card.priority && (
+            <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${prio.bg} ${prio.text}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${prio.dot}`}></span>
+              {card.priority}
+            </span>
+          )}
+          {card.dueDate && (
+            <span className={`text-[11px] flex items-center gap-1 ${isOverdue(card.dueDate) ? "text-red-500 font-semibold" : "text-notion-muted"}`}>
+              <Icon d={IC.calendar} size={11} />
+              {fmtDate(card.dueDate)}
+            </span>
+          )}
+        </div>
+        {assignee && <Avatar name={assignee.name} size="sm" />}
+      </div>
+    </>
+  );
+}
+
+// ═════════════════════════════════════════════════════════
+//  DRAG OVERLAY (floating clone that follows the cursor)
+// ═════════════════════════════════════════════════════════
+function DragOverlay({ drag }) {
+  const { users } = useContext(AppContext);
+  const overlayRef = useRef(null);
+
+  const x = drag.snapping ? drag.startX : drag.x - drag.offsetX;
+  const y = drag.snapping ? drag.startY : drag.y - drag.offsetY;
 
   return (
-    <div className="group relative bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-gray-600 transition-all cursor-grab active:cursor-grabbing"
-         draggable="true" onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+    <div ref={overlayRef}
+         style={{
+           position: 'fixed',
+           left: x,
+           top: y,
+           width: drag.width,
+           zIndex: 9999,
+           pointerEvents: 'none',
+           transform: drag.snapping ? 'scale(1) rotate(0deg)' : 'scale(1.03) rotate(1deg)',
+           opacity: drag.snapping ? 0.5 : 1,
+           transition: drag.snapping
+             ? 'left 0.25s ease, top 0.25s ease, opacity 0.25s ease, transform 0.25s ease'
+             : 'transform 0.1s ease',
+         }}>
+      <div className="bg-white dark:bg-gray-900 border border-notion-accent rounded-2xl shadow-2xl px-3 py-2.5">
+        <CardInner card={drag.card} users={users} />
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════
+//  CARD
+// ═════════════════════════════════════════════════════════
+function CardItem({ card, onEdit, onDragStart }) {
+  const { users, activeDragId } = useContext(AppContext);
+  const isDragging = activeDragId === card.id;
+
+  function handleMouseDown(e) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    onDragStart({
+      card,
+      startX: rect.left,
+      startY: rect.top,
+      width: rect.width,
+      offsetX: e.clientX - rect.left,
+      offsetY: e.clientY - rect.top,
+      x: e.clientX,
+      y: e.clientY,
+    });
+  }
+
+  return (
+    <div
+      className={`group relative bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-gray-600 transition-all select-none
+        ${isDragging ? "opacity-30 pointer-events-none" : "cursor-grab active:cursor-grabbing"}`}
+      onMouseDown={handleMouseDown}
+      onClick={() => { if (!isDragging) onEdit(card); }}
+    >
       <div className="hover-handle absolute -left-5 top-1/2 -translate-y-1/2 p-0.5 text-notion-muted cursor-grab">
         <Icon d={IC.grip} size={14} />
       </div>
-
-      <div className="px-3 py-2.5 cursor-pointer" onClick={() => onEdit(card)}>
-        <p className="text-sm font-medium text-notion-text dark:text-notion-text-dark leading-snug mb-1.5">{card.title}</p>
-
-        {card.description && (
-          <p className="text-xs text-notion-muted leading-relaxed mb-2" style={{display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden'}}>{card.description}</p>
-        )}
-
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {card.priority && (
-              <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${prio.bg} ${prio.text}`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${prio.dot}`}></span>
-                {card.priority}
-              </span>
-            )}
-            {card.dueDate && (
-              <span className={`text-[11px] flex items-center gap-1 ${isOverdue(card.dueDate) ? "text-red-500 font-semibold" : "text-notion-muted"}`}>
-                <Icon d={IC.calendar} size={11} />
-                {fmtDate(card.dueDate)}
-              </span>
-            )}
-          </div>
-          {assignee && <Avatar name={assignee.name} size="sm" />}
-        </div>
+      <div className="px-3 py-2.5">
+        <CardInner card={card} users={users} />
       </div>
     </div>
   );
@@ -373,21 +425,15 @@ function CardItem({ card, onEdit }) {
 // ═════════════════════════════════════════════════════════
 //  COLUMN
 // ═════════════════════════════════════════════════════════
-function Column({ column, cards, onEditCard, onAddCard }) {
-  const [dragOver, setDragOver] = useState(false);
-  const { moveCard } = useContext(AppContext);
-
-  function handleDragOver(e) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOver(true); }
-  function handleDragLeave(e) { if (!e.currentTarget.contains(e.relatedTarget)) setDragOver(false); }
-  function handleDrop(e) {
-    e.preventDefault(); setDragOver(false);
-    const cardId = e.dataTransfer.getData("text/plain");
-    if (cardId) moveCard(cardId, column.id);
-  }
+function Column({ column, cards, onEditCard, onAddCard, onCardDragStart, hoveredColumnId }) {
+  const isHovered = hoveredColumnId === column.id;
 
   return (
-    <div className={`flex flex-col min-w-[272px] max-w-[320px] flex-1 rounded-xl transition-colors ${dragOver ? "column-drop-active" : ""}`}
-         onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+    <div
+      data-column-id={column.id}
+      className={`flex flex-col min-w-[272px] max-w-[320px] flex-1 rounded-xl transition-all duration-150
+        ${isHovered ? "ring-2 ring-notion-accent bg-blue-50/40 dark:bg-blue-950/20" : ""}`}
+    >
       <div className="flex items-center gap-2 px-2 py-2 mb-1">
         <span className={`w-2.5 h-2.5 rounded-full ${column.color}`}></span>
         <h3 className="text-xs font-semibold uppercase tracking-wide text-notion-muted flex-1">{column.label}</h3>
@@ -400,11 +446,16 @@ function Column({ column, cards, onEditCard, onAddCard }) {
 
       <div className="flex flex-col gap-2 px-1 min-h-[60px] flex-1 pl-6">
         {cards.length === 0 && (
-          <div className="flex items-center justify-center py-8 text-xs text-gray-400 dark:text-gray-600 border border-dashed border-gray-300 dark:border-gray-700 rounded-lg bg-gray-50/50 dark:bg-gray-900/20">
+          <div className={`flex items-center justify-center py-8 text-xs border border-dashed rounded-lg transition-colors
+            ${isHovered
+              ? "border-notion-accent text-notion-accent bg-blue-50/60 dark:bg-blue-950/30"
+              : "border-gray-300 dark:border-gray-700 text-gray-400 dark:text-gray-600 bg-gray-50/50 dark:bg-gray-900/20"}`}>
             Drop cards here
           </div>
         )}
-        {cards.map(card => <CardItem key={card.id} card={card} onEdit={onEditCard} />)}
+        {cards.map(card => (
+          <CardItem key={card.id} card={card} onEdit={onEditCard} onDragStart={onCardDragStart} />
+        ))}
       </div>
 
       <button onClick={() => onAddCard(column.id)}
@@ -572,17 +623,82 @@ function ConfigBanner() {
 //  BOARD PAGE
 // ═════════════════════════════════════════════════════════
 function BoardPage() {
-  const { cards, saveCard, deleteCard } = useContext(AppContext);
+  const { cards, saveCard, deleteCard, moveCard, setActiveDragId } = useContext(AppContext);
   const [modalState, setModalState] = useState(null);
+  const [drag, setDrag] = useState(null);
+  const [hoveredColumnId, setHoveredColumnId] = useState(null);
+  const snapTimerRef = useRef(null);
 
   function openNew(status) { setModalState({ defaultStatus: status }); }
   function openEdit(card) { setModalState({ card }); }
   function closeModal() { setModalState(null); }
-
   function handleSave(cardData) { saveCard(cardData); closeModal(); }
   function handleDelete(cardId) {
     if (confirm("Delete this card?")) { deleteCard(cardId); closeModal(); }
   }
+
+  function handleCardDragStart(info) {
+    setActiveDragId(info.card.id);
+    setDrag({ ...info, snapping: false });
+  }
+
+  // Find which column the cursor is over
+  function getColumnAtPoint(x, y) {
+    const els = document.elementsFromPoint(x, y);
+    for (const el of els) {
+      if (el.dataset && el.dataset.columnId) return el.dataset.columnId;
+    }
+    return null;
+  }
+
+  useEffect(() => {
+    if (!drag) return;
+
+    function onMove(e) {
+      if (drag.snapping) return;
+      const colId = getColumnAtPoint(e.clientX, e.clientY);
+      setHoveredColumnId(colId);
+      setDrag(prev => prev && !prev.snapping ? { ...prev, x: e.clientX, y: e.clientY } : prev);
+    }
+
+    function onUp(e) {
+      const colId = getColumnAtPoint(e.clientX, e.clientY);
+      if (colId && colId !== drag.card.status) {
+        moveCard(drag.card.id, colId);
+      }
+
+      if (colId) {
+        // Valid drop — remove immediately
+        setDrag(null);
+        setHoveredColumnId(null);
+        setActiveDragId(null);
+      } else {
+        // Invalid drop — snap back then clear
+        setDrag(prev => prev ? { ...prev, snapping: true } : null);
+        setHoveredColumnId(null);
+        snapTimerRef.current = setTimeout(() => {
+          setDrag(null);
+          setActiveDragId(null);
+        }, 280);
+      }
+    }
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [drag]);
+
+  // Body cursor during drag
+  useEffect(() => {
+    document.body.classList.toggle('dragging', !!drag && !drag.snapping);
+    return () => document.body.classList.remove('dragging');
+  }, [drag]);
+
+  // Cleanup snap timer on unmount
+  useEffect(() => () => { if (snapTimerRef.current) clearTimeout(snapTimerRef.current); }, []);
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -603,10 +719,14 @@ function BoardPage() {
             <Column key={col.id} column={col}
                     cards={cards.filter(c => c.status === col.id)}
                     onEditCard={openEdit}
-                    onAddCard={openNew} />
+                    onAddCard={openNew}
+                    onCardDragStart={handleCardDragStart}
+                    hoveredColumnId={hoveredColumnId} />
           ))}
         </div>
       </div>
+
+      {drag && <DragOverlay drag={drag} />}
 
       {modalState && (
         <CardModal card={modalState.card} defaultStatus={modalState.defaultStatus}
@@ -624,6 +744,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [cards, setCards] = useState([]);
   const [users, setUsers] = useState([]);
+  const [activeDragId, setActiveDragId] = useState(null);
 
   useEffect(() => {
     if (!db) return;
@@ -672,7 +793,7 @@ function App() {
     else setUsers(prev => prev.filter(u => u.id !== userId));
   }, []);
 
-  const ctx = { cards, users, darkMode, setDarkMode, saveCard, deleteCard, moveCard, addUser, removeUser };
+  const ctx = { cards, users, darkMode, setDarkMode, saveCard, deleteCard, moveCard, addUser, removeUser, activeDragId, setActiveDragId };
 
   return (
     <AppContext.Provider value={ctx}>
