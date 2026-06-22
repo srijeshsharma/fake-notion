@@ -819,16 +819,34 @@ function ProjectEditor({ projectId }) {
     return () => document.removeEventListener('selectionchange', updateFormats);
   }, []);
 
+  const forceTimer = useRef(null);
+
+  function doSave(overrides = {}) {
+    updateProject(projectId, {
+      title: overrides.title ?? title,
+      emoji: overrides.emoji ?? emoji,
+      content: editorRef.current?.innerHTML || "",
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
   function save(overrides = {}) {
+    // Debounce: save 300ms after last keystroke
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      updateProject(projectId, {
-        title: overrides.title ?? title,
-        emoji: overrides.emoji ?? emoji,
-        content: editorRef.current?.innerHTML || "",
-        updatedAt: new Date().toISOString(),
-      });
+      clearTimeout(forceTimer.current);
+      forceTimer.current = null;
+      doSave(overrides);
     }, 300);
+
+    // Force-save every 2s even if typing is continuous
+    if (!forceTimer.current) {
+      forceTimer.current = setTimeout(() => {
+        forceTimer.current = null;
+        clearTimeout(saveTimer.current);
+        doSave(overrides);
+      }, 2000);
+    }
   }
 
   function fmt(cmd, val = null) {
