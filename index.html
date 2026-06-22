@@ -103,6 +103,13 @@ if (isConfigured()) {
   db = firebase.firestore();
 }
 
+// Unique ID for this browser session — used to identify the current editor
+const SESSION_ID = (() => {
+  let id = sessionStorage.getItem('fn-sid');
+  if (!id) { id = Math.random().toString(36).slice(2, 10); sessionStorage.setItem('fn-sid', id); }
+  return id;
+})();
+
 // ── Constants ───────────────────────────────────────────
 const COLUMNS = [
   { id: "not-started",      label: "Not Started",      emoji: "\u{1F4CB}", color: "bg-gray-400" },
@@ -821,6 +828,37 @@ function ProjectEditor({ projectId }) {
 
   const forceTimer = useRef(null);
   const lastTyped = useRef(0);
+  const presenceTimer = useRef(null);
+  const [remoteEditor, setRemoteEditor] = useState(null);
+
+  // Display name for this session — persist in localStorage, seed from users list
+  const sessionName = useRef(localStorage.getItem('fn-name') || 'A teammate');
+  useEffect(() => {
+    if (!localStorage.getItem('fn-name') && users?.length > 0) {
+      sessionName.current = users[0].name;
+      localStorage.setItem('fn-name', users[0].name);
+    }
+  }, [users?.length]); // eslint-disable-line
+
+  // Watch for another user's presence on this document
+  useEffect(() => {
+    const p = project?.presence;
+    if (!p || p.id === SESSION_ID) { setRemoteEditor(null); return; }
+    const age = Date.now() - new Date(p.at).getTime();
+    setRemoteEditor(age < 5000 ? p : null);
+  }, [project?.presence?.at]); // eslint-disable-line
+
+  function writePresence() {
+    if (!db) return;
+    db.collection('projects').doc(projectId).update({
+      presence: { id: SESSION_ID, name: sessionName.current, at: new Date().toISOString() }
+    }).catch(() => {});
+  }
+
+  function clearPresence() {
+    if (!db) return;
+    db.collection('projects').doc(projectId).update({ presence: null }).catch(() => {});
+  }
 
   function doSave(overrides = {}) {
     updateProject(projectId, {
@@ -945,13 +983,32 @@ function ProjectEditor({ projectId }) {
                  className="w-full text-4xl font-bold text-notion-text dark:text-notion-text-dark bg-transparent outline-none placeholder-gray-200 dark:placeholder-gray-800 mb-6 leading-tight" />
           {/* Divider */}
           <div className="border-t border-gray-100 dark:border-gray-800 mb-6" />
+
+          {/* Remote editor presence banner */}
+          {remoteEditor && (
+            <div className="flex items-center gap-2 mb-4 px-4 py-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl text-sm text-amber-800 dark:text-amber-300">
+              <span className="text-base">✏️</span>
+              <span><strong>{remoteEditor.name}</strong> is currently editing — your changes may overwrite theirs</span>
+            </div>
+          )}
+
           {/* Content */}
           <div ref={editorRef}
                contentEditable
                suppressContentEditableWarning
                data-placeholder="Start writing… or type / for commands"
                className="notion-editor outline-none min-h-[400px]"
-               onInput={() => { lastTyped.current = Date.now(); save(); }}
+               onInput={() => {
+                 lastTyped.current = Date.now();
+                 save();
+                 writePresence();
+                 clearTimeout(presenceTimer.current);
+                 presenceTimer.current = setTimeout(clearPresence, 3500);
+               }}
+               onBlur={() => {
+                 clearTimeout(presenceTimer.current);
+                 clearPresence();
+               }}
                onKeyDown={e => {
                  if ((e.metaKey || e.ctrlKey) && e.key === 'b') { e.preventDefault(); fmt('bold'); }
                  if ((e.metaKey || e.ctrlKey) && e.key === 'i') { e.preventDefault(); fmt('italic'); }
