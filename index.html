@@ -489,7 +489,7 @@ function CardItem({ card, onEdit, onDragStart }) {
       <button
         data-edit-btn="true"
         onClick={e => { e.stopPropagation(); onEdit(card); }}
-        className="absolute top-2 right-2 p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-gray-100 dark:hover:bg-gray-700 text-notion-muted hover:text-notion-text dark:hover:text-notion-text-dark transition-all z-10"
+        className="absolute top-2 right-2 p-1 rounded-md opacity-40 hover:opacity-100 hover:bg-gray-100 dark:hover:bg-gray-700 text-notion-muted hover:text-notion-text dark:hover:text-notion-text-dark transition-all z-10"
         title="Edit card"
       >
         <Icon d={IC.edit} size={13} />
