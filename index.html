@@ -1326,16 +1326,71 @@ function ItemRow({ item, isLink, compatibleFolders, onRelocate, onDelete, isLast
 
 // ─── Folder Section ──────────────────────────────────────
 function FolderSection({ folder, items, allFolders, onRelocate, onDelete }) {
+  const { updateFileType, deleteFileType } = useContext(AppContext);
   const isLink = folder.type === 'link';
   const c = folderColor(folder.type);
   const compat = allFolders.filter(f => f.type === folder.type && f.id !== folder.id);
+  const [renaming, setRenaming] = useState(false);
+  const [newName, setNewName] = useState(folder.name);
+  const [showMenu, setShowMenu] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!showMenu) return;
+    function close(e) { if (menuRef.current && !menuRef.current.contains(e.target)) setShowMenu(false); }
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [showMenu]);
+
+  function handleRename(e) {
+    e.preventDefault();
+    const trimmed = newName.trim();
+    if (trimmed && trimmed !== folder.name) updateFileType(folder.id, { name: trimmed });
+    setRenaming(false);
+    setShowMenu(false);
+  }
+
+  function handleDelete() {
+    setShowMenu(false);
+    if (confirm(`Delete folder "${folder.name}" and all its items?`)) deleteFileType(folder.id);
+  }
 
   return (
     <div className={`border ${c.border} rounded-2xl overflow-hidden`}>
       <div className={`flex items-center gap-2.5 px-4 py-3 ${c.bg} border-b ${c.border}`}>
         <span>{isLink ? '🔗' : '📁'}</span>
-        <span className={`font-semibold text-sm ${c.text}`}>{folder.name}</span>
+        {renaming ? (
+          <form onSubmit={handleRename} className="flex items-center gap-2 flex-1">
+            <input value={newName} onChange={e => setNewName(e.target.value)} autoFocus
+                   onBlur={handleRename}
+                   className={`text-sm font-semibold bg-white/70 dark:bg-black/20 rounded px-2 py-0.5 outline-none border ${c.border} flex-1 min-w-0`} />
+          </form>
+        ) : (
+          <span className={`font-semibold text-sm ${c.text} flex-1`}>{folder.name}</span>
+        )}
         <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${c.badge}`}>{items.length}</span>
+        {/* Folder actions menu */}
+        <div className="relative" ref={menuRef}>
+          <button onClick={() => setShowMenu(!showMenu)}
+                  className="p-1 rounded-md hover:bg-black/10 dark:hover:bg-white/10 text-current opacity-50 hover:opacity-100 transition-opacity">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>
+            </svg>
+          </button>
+          {showMenu && (
+            <div className="slash-menu absolute right-0 top-full mt-1 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl py-1 z-30 min-w-[140px]">
+              <button onClick={() => { setRenaming(true); setNewName(folder.name); setShowMenu(false); }}
+                      className="flex items-center gap-2 w-full px-3 py-2 text-sm text-notion-text dark:text-notion-text-dark hover:bg-gray-50 dark:hover:bg-gray-800">
+                <Icon d={IC.edit} size={13} />Rename
+              </button>
+              <div className="border-t border-gray-100 dark:border-gray-800 my-1" />
+              <button onClick={handleDelete}
+                      className="flex items-center gap-2 w-full px-3 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20">
+                <Icon d={IC.trash} size={13} />Delete folder
+              </button>
+            </div>
+          )}
+        </div>
       </div>
       {items.length === 0 ? (
         <div className="py-7 text-center text-xs text-notion-muted">No items — click Add files above</div>
@@ -1678,6 +1733,23 @@ function App() {
     }
   }, []);
 
+  const updateFileType = useCallback(async (id, updates) => {
+    if (db) await db.collection("fileTypes").doc(id).update(updates);
+    else setFileTypes(prev => prev.map(f => f.id === id ? { ...f, ...updates } : f));
+  }, []);
+
+  const deleteFileType = useCallback(async (id) => {
+    if (db) {
+      await db.collection("fileTypes").doc(id).delete();
+      // Also delete all items in this folder
+      const snap = await db.collection("fileItems").where("folderId", "==", id).get();
+      await Promise.all(snap.docs.map(d => d.ref.delete()));
+    } else {
+      setFileTypes(prev => prev.filter(f => f.id !== id));
+      setFileItems(prev => prev.filter(i => i.folderId !== id));
+    }
+  }, []);
+
   const createFileItem = useCallback(async (data) => {
     const payload = { ...data, createdAt: new Date().toISOString() };
     if (db) {
@@ -1719,7 +1791,7 @@ function App() {
     else setProjects(prev => prev.filter(p => p.id !== projectId));
   }, []);
 
-  const ctx = { cards, users, projects, fileTypes, fileItems, view, setView, darkMode, setDarkMode, saveCard, deleteCard, moveCard, addUser, removeUser, createProject, updateProject, deleteProject, createFileType, createFileItem, updateFileItem, deleteFileItem, activeDragId, setActiveDragId };
+  const ctx = { cards, users, projects, fileTypes, fileItems, view, setView, darkMode, setDarkMode, saveCard, deleteCard, moveCard, addUser, removeUser, createProject, updateProject, deleteProject, createFileType, updateFileType, deleteFileType, createFileItem, updateFileItem, deleteFileItem, activeDragId, setActiveDragId };
 
   return (
     <AppContext.Provider value={ctx}>
