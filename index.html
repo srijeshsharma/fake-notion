@@ -156,6 +156,11 @@ const IC = {
   board:       "M3 3h6v8H3zM3 13h6v8H3zM11 3h6v5H11zM11 10h6v11H11zM19 3h2v7h-2zM19 12h2v9h-2z",
   userPlus:    "M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M12.5 7a4 4 0 100-8 4 4 0 000 8zM20 8v6M23 11h-6",
   edit:        "M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z",
+  link:        "M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71",
+  file:        "M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8",
+  upload:      "M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12",
+  move:        "M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20",
+  folderOpen:  "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z",
 };
 
 // ── Helpers ─────────────────────────────────────────────
@@ -237,9 +242,10 @@ function Sidebar({ collapsed, onToggle }) {
 
       {/* Nav */}
       <div className="flex-1 overflow-y-auto py-2 px-1.5">
-        <SidebarItem icon={IC.board} label="Board" active={view.type === 'board'} onClick={() => setView({ type: 'board' })} />
-        <SidebarItem icon={IC.edit} label="Projects" active={view.type === 'projects' || view.type === 'project'} onClick={() => setView({ type: 'projects' })} />
-        <SidebarItem icon={IC.search} label="Search" />
+        <SidebarItem icon={IC.board}       label="Board"    active={view.type === 'board'}                              onClick={() => setView({ type: 'board' })} />
+        <SidebarItem icon={IC.edit}        label="Projects" active={view.type === 'projects' || view.type === 'project'} onClick={() => setView({ type: 'projects' })} />
+        <SidebarItem icon={IC.folderOpen}  label="Files"    active={view.type === 'files'}                              onClick={() => setView({ type: 'files' })} />
+        <SidebarItem icon={IC.search}      label="Search" />
 
         {/* Team */}
         <div className="mt-5 mb-1 px-2">
@@ -831,14 +837,8 @@ function ProjectEditor({ projectId }) {
   const presenceTimer = useRef(null);
   const [remoteEditor, setRemoteEditor] = useState(null);
 
-  // Display name for this session — persist in localStorage, seed from users list
+  // Display name for this session — stored in localStorage
   const sessionName = useRef(localStorage.getItem('fn-name') || 'A teammate');
-  useEffect(() => {
-    if (!localStorage.getItem('fn-name') && users?.length > 0) {
-      sessionName.current = users[0].name;
-      localStorage.setItem('fn-name', users[0].name);
-    }
-  }, [users?.length]); // eslint-disable-line
 
   // Watch for another user's presence on this document
   useEffect(() => {
@@ -1022,6 +1022,453 @@ function ProjectEditor({ projectId }) {
 }
 
 // ═════════════════════════════════════════════════════════
+//  FILES — constants
+// ═════════════════════════════════════════════════════════
+const LINK_COLOR = { border: "border-blue-200 dark:border-blue-800", bg: "bg-blue-50 dark:bg-blue-900/20", text: "text-blue-600 dark:text-blue-400", dot: "bg-blue-400", badge: "bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300" };
+const FILE_COLOR = { border: "border-purple-200 dark:border-purple-800", bg: "bg-purple-50 dark:bg-purple-900/20", text: "text-purple-600 dark:text-purple-400", dot: "bg-purple-400", badge: "bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-300" };
+
+function folderColor(type) { return type === 'link' ? LINK_COLOR : FILE_COLOR; }
+function fmtSize(bytes) { return bytes < 1024 ? bytes + ' B' : bytes < 1048576 ? (bytes/1024).toFixed(1) + ' KB' : (bytes/1048576).toFixed(1) + ' MB'; }
+
+// ─── Create Folder Modal ────────────────────────────────
+function CreateFolderModal({ onClose, onSave }) {
+  const [name, setName] = useState('');
+  const [type, setType] = useState('link');
+  function handleSave(e) { e.preventDefault(); if (!name.trim()) return; onSave({ name: name.trim(), type }); }
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px] p-4"
+         onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal-enter bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 w-full max-w-sm">
+        <div className="flex items-center justify-between px-6 pt-5 pb-3">
+          <h2 className="text-lg font-semibold text-notion-text dark:text-notion-text-dark">New Folder</h2>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-notion-muted"><Icon d={IC.x} size={16} /></button>
+        </div>
+        <form onSubmit={handleSave} className="px-6 pb-6 space-y-4">
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-wide text-notion-muted mb-1 block">Folder name *</label>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Design Resources" required autoFocus
+                   className="w-full text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-notion-text dark:text-notion-text-dark rounded-lg px-3 py-2 outline-none focus:border-notion-accent" />
+          </div>
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-wide text-notion-muted mb-2 block">Folder type</label>
+            <div className="grid grid-cols-2 gap-2">
+              {[{ v:'link', label:'Link folder', icon:'🔗', c:LINK_COLOR }, { v:'file', label:'File folder', icon:'📁', c:FILE_COLOR }].map(opt => (
+                <button key={opt.v} type="button" onClick={() => setType(opt.v)}
+                        className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border-2 text-sm font-medium transition-all
+                          ${type === opt.v ? `${opt.c.border} ${opt.c.bg} ${opt.c.text}` : 'border-gray-200 dark:border-gray-700 text-notion-muted hover:border-gray-300'}`}>
+                  <span>{opt.icon}</span>{opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose} className="px-4 py-1.5 text-sm text-notion-muted hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg">Cancel</button>
+            <button type="submit" className="px-4 py-1.5 text-sm font-medium bg-notion-text dark:bg-notion-text-dark text-white dark:text-notion-bg-dark rounded-lg hover:opacity-90">Create</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Add Files Modal (1/2 container, two options) ───────
+function AddFilesModal({ onClose, onAddLink, onAddFile }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px] p-4"
+         onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal-enter bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
+           style={{ width: 'min(50vw, 640px)', minWidth: 400 }}>
+        <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100 dark:border-gray-800">
+          <h2 className="text-lg font-semibold text-notion-text dark:text-notion-text-dark">Add to Files</h2>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-notion-muted"><Icon d={IC.x} size={16} /></button>
+        </div>
+        <div className="p-6 grid grid-cols-2 gap-4" style={{ minHeight: '40vh' }}>
+          <button onClick={onAddLink}
+                  className="flex flex-col items-center justify-center gap-4 p-6 border-2 border-dashed border-blue-200 dark:border-blue-800 rounded-2xl hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/20 transition-all group">
+            <div className="w-16 h-16 rounded-2xl bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center text-blue-500 group-hover:scale-110 transition-transform">
+              <Icon d={IC.link} size={26} />
+            </div>
+            <div className="text-center">
+              <p className="font-semibold text-notion-text dark:text-notion-text-dark">Add Link</p>
+              <p className="text-xs text-notion-muted mt-1">Save a URL to a link folder</p>
+            </div>
+          </button>
+          <button onClick={onAddFile}
+                  className="flex flex-col items-center justify-center gap-4 p-6 border-2 border-dashed border-purple-200 dark:border-purple-800 rounded-2xl hover:border-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/20 transition-all group">
+            <div className="w-16 h-16 rounded-2xl bg-purple-100 dark:bg-purple-900/40 flex items-center justify-center text-purple-500 group-hover:scale-110 transition-transform">
+              <Icon d={IC.upload} size={26} />
+            </div>
+            <div className="text-center">
+              <p className="font-semibold text-notion-text dark:text-notion-text-dark">Add File</p>
+              <p className="text-xs text-notion-muted mt-1">Upload from your computer</p>
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Add Link Modal ─────────────────────────────────────
+function AddLinkModal({ linkFolders, onClose, onSave, onCreateFolder }) {
+  const [title, setTitle] = useState('');
+  const [url, setUrl] = useState('');
+  const folders = linkFolders.length > 0 ? linkFolders : [{ id: 'misc', name: 'Misc' }];
+  const [folderId, setFolderId] = useState(folders[0].id);
+
+  function handleSave(e) {
+    e.preventDefault();
+    if (!url.trim()) return;
+    const finalUrl = url.trim().startsWith('http') ? url.trim() : 'https://' + url.trim();
+    onSave({ title: title.trim() || finalUrl, url: finalUrl, folderId });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px] p-4"
+         onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal-enter bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 w-full max-w-md">
+        <div className="flex items-center justify-between px-6 pt-5 pb-3">
+          <h2 className="text-lg font-semibold text-notion-text dark:text-notion-text-dark">Add Link</h2>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-notion-muted"><Icon d={IC.x} size={16} /></button>
+        </div>
+        <form onSubmit={handleSave} className="px-6 pb-6 space-y-3">
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-wide text-notion-muted mb-1 block">URL *</label>
+            <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://…" required autoFocus
+                   className="w-full text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-notion-text dark:text-notion-text-dark rounded-lg px-3 py-2 outline-none focus:border-notion-accent" />
+          </div>
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-wide text-notion-muted mb-1 block">Title (optional)</label>
+            <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Display name…"
+                   className="w-full text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-notion-text dark:text-notion-text-dark rounded-lg px-3 py-2 outline-none focus:border-notion-accent" />
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-semibold uppercase tracking-wide text-notion-muted">Folder</label>
+              <button type="button" onClick={onCreateFolder} className="text-[11px] text-notion-accent hover:underline">+ New folder</button>
+            </div>
+            <select value={folderId} onChange={e => setFolderId(e.target.value)}
+                    className="w-full text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-notion-text dark:text-notion-text-dark rounded-lg px-3 py-2 outline-none focus:border-notion-accent">
+              {folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={onClose} className="px-4 py-1.5 text-sm text-notion-muted hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg">Cancel</button>
+            <button type="submit" className="px-4 py-1.5 text-sm font-medium bg-blue-500 text-white rounded-lg hover:bg-blue-600">Save Link</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Add File Modal ─────────────────────────────────────
+function AddFileModal({ fileFolders, onClose, onSave, onCreateFolder }) {
+  const [fileObj, setFileObj] = useState(null);
+  const [dragging, setDragging] = useState(false);
+  const [err, setErr] = useState('');
+  const folders = fileFolders.length > 0 ? fileFolders : [{ id: 'misc', name: 'Misc' }];
+  const [folderId, setFolderId] = useState(folders[0].id);
+  const inputRef = useRef(null);
+
+  function processFile(f) {
+    if (f.size > 750 * 1024) { setErr('Max 750 KB — larger files need Firebase Storage'); return; }
+    setErr('');
+    const reader = new FileReader();
+    reader.onload = e => setFileObj({ name: f.name, type: f.type, size: f.size, data: e.target.result });
+    reader.readAsDataURL(f);
+  }
+
+  function handleDrop(e) { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files[0]; if (f) processFile(f); }
+
+  function handleSave(e) {
+    e.preventDefault();
+    if (!fileObj) return;
+    onSave({ title: fileObj.name, fileName: fileObj.name, fileType: fileObj.type, fileSize: fileObj.size, fileData: fileObj.data, folderId });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px] p-4"
+         onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal-enter bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 w-full max-w-md">
+        <div className="flex items-center justify-between px-6 pt-5 pb-3">
+          <h2 className="text-lg font-semibold text-notion-text dark:text-notion-text-dark">Add File</h2>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-notion-muted"><Icon d={IC.x} size={16} /></button>
+        </div>
+        <form onSubmit={handleSave} className="px-6 pb-6 space-y-3">
+          <input ref={inputRef} type="file" className="hidden" onChange={e => { if(e.target.files[0]) processFile(e.target.files[0]); }} />
+          <div onDragOver={e => { e.preventDefault(); setDragging(true); }}
+               onDragLeave={() => setDragging(false)}
+               onDrop={handleDrop}
+               onClick={() => inputRef.current?.click()}
+               className={`flex flex-col items-center justify-center gap-3 py-8 border-2 border-dashed rounded-2xl cursor-pointer transition-all
+                 ${dragging ? 'border-purple-400 bg-purple-50 dark:bg-purple-950/20' : 'border-gray-300 dark:border-gray-700 hover:border-purple-300 hover:bg-purple-50/30 dark:hover:bg-purple-950/10'}`}>
+            {fileObj ? (
+              <div className="flex items-center gap-3 w-full px-4">
+                <div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-900/40 flex items-center justify-center text-lg flex-shrink-0">📄</div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-notion-text dark:text-notion-text-dark truncate">{fileObj.name}</p>
+                  <p className="text-xs text-notion-muted">{fmtSize(fileObj.size)}</p>
+                </div>
+                <button type="button" onClick={e => { e.stopPropagation(); setFileObj(null); }} className="p-1 text-notion-muted hover:text-red-500">
+                  <Icon d={IC.x} size={14} />
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="w-12 h-12 rounded-2xl bg-purple-100 dark:bg-purple-900/40 flex items-center justify-center text-purple-500">
+                  <Icon d={IC.upload} size={22} />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-medium text-notion-text dark:text-notion-text-dark">Drop file here</p>
+                  <p className="text-xs text-notion-muted mt-0.5">or click to browse · max 750 KB</p>
+                </div>
+              </>
+            )}
+          </div>
+          {err && <p className="text-xs text-red-500">{err}</p>}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-semibold uppercase tracking-wide text-notion-muted">Folder</label>
+              <button type="button" onClick={onCreateFolder} className="text-[11px] text-notion-accent hover:underline">+ New folder</button>
+            </div>
+            <select value={folderId} onChange={e => setFolderId(e.target.value)}
+                    className="w-full text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-notion-text dark:text-notion-text-dark rounded-lg px-3 py-2 outline-none focus:border-notion-accent">
+              {folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={onClose} className="px-4 py-1.5 text-sm text-notion-muted hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg">Cancel</button>
+            <button type="submit" disabled={!fileObj}
+                    className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-all ${fileObj ? 'bg-purple-500 text-white hover:bg-purple-600' : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'}`}>
+              Save File
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Item Row ────────────────────────────────────────────
+function ItemRow({ item, isLink, compatibleFolders, onRelocate, onDelete, isLast }) {
+  const [showMove, setShowMove] = useState(false);
+  const moveRef = useRef(null);
+
+  useEffect(() => {
+    if (!showMove) return;
+    function close(e) { if (moveRef.current && !moveRef.current.contains(e.target)) setShowMove(false); }
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [showMove]);
+
+  function handleOpen() {
+    if (isLink) { window.open(item.url, '_blank', 'noopener'); return; }
+    if (item.fileData) { const a = document.createElement('a'); a.href = item.fileData; a.download = item.fileName || 'file'; a.click(); }
+  }
+
+  const ext = item.fileType?.split('/')[1]?.toUpperCase().slice(0,4) || 'FILE';
+
+  return (
+    <tr className={`hover:bg-gray-50 dark:hover:bg-gray-900/50 transition-colors ${!isLast ? 'border-b border-gray-100 dark:border-gray-800' : ''}`}>
+      <td className="px-4 py-2.5 max-w-[220px]">
+        <button onClick={handleOpen} title={isLink ? item.url : item.fileName}
+                className="text-sm font-medium text-notion-text dark:text-notion-text-dark hover:text-notion-accent truncate block text-left w-full">
+          {item.title || item.fileName}
+        </button>
+      </td>
+      {isLink && (
+        <td className="px-4 py-2.5 max-w-[200px]">
+          <span className="text-xs text-notion-muted truncate block">{item.url}</span>
+        </td>
+      )}
+      {!isLink && (
+        <td className="px-4 py-2.5"><span className="text-xs font-mono text-notion-muted">{ext}</span></td>
+      )}
+      {!isLink && (
+        <td className="px-4 py-2.5"><span className="text-xs text-notion-muted">{item.fileSize ? fmtSize(item.fileSize) : '—'}</span></td>
+      )}
+      <td className="px-4 py-2.5 whitespace-nowrap">
+        <span className="text-xs text-notion-muted">
+          {item.createdAt ? new Date(item.createdAt).toLocaleDateString("en-US", { month:"short", day:"numeric" }) : '—'}
+        </span>
+      </td>
+      <td className="px-4 py-2.5">
+        <div className="flex items-center gap-0.5 justify-end">
+          {compatibleFolders.length > 0 && (
+            <div className="relative" ref={moveRef}>
+              <button onClick={() => setShowMove(!showMove)} title="Move to folder"
+                      className="p-1.5 rounded-md text-notion-muted hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-notion-text dark:hover:text-notion-text-dark transition-colors">
+                <Icon d={IC.move} size={13} />
+              </button>
+              {showMove && (
+                <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl py-1.5 z-20 min-w-[150px]">
+                  <div className="px-3 py-1 text-[10px] font-semibold uppercase text-notion-muted tracking-wider">Move to</div>
+                  {compatibleFolders.map(f => (
+                    <button key={f.id} onClick={() => { onRelocate(item.id, f.id); setShowMove(false); }}
+                            className="w-full text-left px-3 py-1.5 text-sm text-notion-text dark:text-notion-text-dark hover:bg-gray-50 dark:hover:bg-gray-800">
+                      {f.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <button onClick={() => { if(confirm('Delete this item?')) onDelete(item.id); }}
+                  className="p-1.5 rounded-md text-notion-muted hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-500 transition-colors">
+            <Icon d={IC.trash} size={13} />
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// ─── Folder Section ──────────────────────────────────────
+function FolderSection({ folder, items, allFolders, onRelocate, onDelete }) {
+  const isLink = folder.type === 'link';
+  const c = folderColor(folder.type);
+  const compat = allFolders.filter(f => f.type === folder.type && f.id !== folder.id);
+
+  return (
+    <div className={`border ${c.border} rounded-2xl overflow-hidden`}>
+      <div className={`flex items-center gap-2.5 px-4 py-3 ${c.bg} border-b ${c.border}`}>
+        <span>{isLink ? '🔗' : '📁'}</span>
+        <span className={`font-semibold text-sm ${c.text}`}>{folder.name}</span>
+        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${c.badge}`}>{items.length}</span>
+      </div>
+      {items.length === 0 ? (
+        <div className="py-7 text-center text-xs text-notion-muted">No items — click Add files above</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800">
+                <th className="text-left px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-notion-muted">Name</th>
+                {isLink && <th className="text-left px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-notion-muted">URL</th>}
+                {!isLink && <th className="text-left px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-notion-muted">Type</th>}
+                {!isLink && <th className="text-left px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-notion-muted">Size</th>}
+                <th className="text-left px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-notion-muted">Added</th>
+                <th className="px-4 py-2 w-20"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item, i) => (
+                <ItemRow key={item.id} item={item} isLink={isLink}
+                         compatibleFolders={compat}
+                         onRelocate={onRelocate} onDelete={onDelete}
+                         isLast={i === items.length - 1} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Files View (main page) ──────────────────────────────
+function FilesView() {
+  const { fileTypes, fileItems, createFileType, createFileItem, updateFileItem, deleteFileItem } = useContext(AppContext);
+  const [modal, setModal] = useState(null); // null | 'add' | 'link' | 'file' | 'folder'
+  const [pendingType, setPendingType] = useState(null); // which type to open folder modal for
+
+  const linkFolders = fileTypes.filter(f => f.type === 'link');
+  const fileFolders  = fileTypes.filter(f => f.type === 'file');
+
+  async function handleSaveLink(data) {
+    // Auto-create Misc folder if needed
+    let folderId = data.folderId;
+    if (folderId === 'misc') {
+      folderId = await createFileType({ name: 'Misc', type: 'link' });
+    }
+    createFileItem({ ...data, folderId, type: 'link' });
+    setModal(null);
+  }
+
+  async function handleSaveFile(data) {
+    let folderId = data.folderId;
+    if (folderId === 'misc') {
+      folderId = await createFileType({ name: 'Misc', type: 'file' });
+    }
+    createFileItem({ ...data, folderId, type: 'file' });
+    setModal(null);
+  }
+
+  function handleSaveFolder(data) {
+    createFileType(data);
+    setModal(pendingType === 'link' ? 'link' : pendingType === 'file' ? 'file' : null);
+    setPendingType(null);
+  }
+
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Top bar */}
+      <div className="h-11 flex items-center justify-between px-4 border-b border-gray-200 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/90 backdrop-blur-sm flex-shrink-0">
+        <div className="flex items-center gap-1.5 text-sm text-notion-muted">
+          <span className="px-1.5">Fake Notion</span>
+          <span className="text-gray-300 dark:text-gray-700">/</span>
+          <span className="text-notion-text dark:text-notion-text-dark font-medium px-1.5">Files</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setModal('folder')}
+                  className="flex items-center gap-1.5 text-sm px-3 py-1 border border-gray-200 dark:border-gray-700 rounded-lg text-notion-muted hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+            <Icon d={IC.plus} size={13} />New folder
+          </button>
+          <ThemeToggle />
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-8 py-7 bg-gray-50/60 dark:bg-gray-950/60">
+        {/* Header */}
+        <div className="flex items-center gap-3 mb-7">
+          <span className="text-3xl">📁</span>
+          <h1 className="text-3xl font-bold text-notion-text dark:text-notion-text-dark">Files</h1>
+        </div>
+
+        {/* Add files zone — 1/4 of container height */}
+        <button onClick={() => setModal('add')}
+                className="w-full flex flex-col items-center justify-center gap-3 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-2xl text-notion-muted hover:border-notion-accent hover:text-notion-accent hover:bg-blue-50/20 dark:hover:bg-blue-950/10 transition-all mb-8"
+                style={{ height: '25vh', minHeight: 120 }}>
+          <div className="w-12 h-12 rounded-2xl bg-gray-100 dark:bg-gray-800 group-hover:bg-blue-100 flex items-center justify-center transition-colors">
+            <Icon d={IC.plus} size={22} />
+          </div>
+          <div className="text-center">
+            <p className="font-semibold text-sm">Add files</p>
+            <p className="text-xs mt-0.5 opacity-60">Upload files or save links into folders</p>
+          </div>
+        </button>
+
+        {/* Folder tables */}
+        {fileTypes.length === 0 ? (
+          <div className="text-center py-12 text-notion-muted text-sm">
+            No folders yet — create one with <strong>New folder</strong> or add a file above.
+          </div>
+        ) : (
+          <div className="space-y-5">
+            {fileTypes.map(folder => (
+              <FolderSection key={folder.id} folder={folder}
+                             items={fileItems.filter(i => i.folderId === folder.id)}
+                             allFolders={fileTypes}
+                             onRelocate={(itemId, newFolderId) => updateFileItem(itemId, { folderId: newFolderId })}
+                             onDelete={deleteFileItem} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Modals */}
+      {modal === 'add'    && <AddFilesModal onClose={() => setModal(null)} onAddLink={() => setModal('link')} onAddFile={() => setModal('file')} />}
+      {modal === 'link'   && <AddLinkModal  linkFolders={linkFolders} onClose={() => setModal(null)} onSave={handleSaveLink}
+                                            onCreateFolder={() => { setPendingType('link'); setModal('folder'); }} />}
+      {modal === 'file'   && <AddFileModal  fileFolders={fileFolders}  onClose={() => setModal(null)} onSave={handleSaveFile}
+                                            onCreateFolder={() => { setPendingType('file'); setModal('folder'); }} />}
+      {modal === 'folder' && <CreateFolderModal onClose={() => setModal(null)} onSave={handleSaveFolder} />}
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════
 //  CONFIG BANNER
 // ═════════════════════════════════════════════════════════
 function ConfigBanner() {
@@ -1160,6 +1607,8 @@ function App() {
   const [cards, setCards] = useState([]);
   const [users, setUsers] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [fileTypes, setFileTypes] = useState([]);
+  const [fileItems, setFileItems] = useState([]);
   const [view, setView] = useState({ type: 'board' });
   const [activeDragId, setActiveDragId] = useState(null);
 
@@ -1171,7 +1620,11 @@ function App() {
       .onSnapshot(snap => setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const unsub3 = db.collection("projects").orderBy("createdAt", "asc")
       .onSnapshot(snap => setProjects(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    return () => { unsub1(); unsub2(); unsub3(); };
+    const unsub4 = db.collection("fileTypes").orderBy("createdAt", "asc")
+      .onSnapshot(snap => setFileTypes(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const unsub5 = db.collection("fileItems").orderBy("createdAt", "asc")
+      .onSnapshot(snap => setFileItems(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); };
   }, []);
 
   useEffect(() => { document.documentElement.classList.toggle("dark", darkMode); }, [darkMode]);
@@ -1212,6 +1665,38 @@ function App() {
     else setUsers(prev => prev.filter(u => u.id !== userId));
   }, []);
 
+  // ── File CRUD ──────────────────────────────────────────
+  const createFileType = useCallback(async (data) => {
+    const payload = { ...data, createdAt: new Date().toISOString() };
+    if (db) {
+      const ref = await db.collection("fileTypes").add({ ...payload, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      return ref.id;
+    } else {
+      const id = genId();
+      setFileTypes(prev => [...prev, { id, ...payload }]);
+      return id;
+    }
+  }, []);
+
+  const createFileItem = useCallback(async (data) => {
+    const payload = { ...data, createdAt: new Date().toISOString() };
+    if (db) {
+      await db.collection("fileItems").add({ ...payload, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    } else {
+      setFileItems(prev => [...prev, { id: genId(), ...payload }]);
+    }
+  }, []);
+
+  const updateFileItem = useCallback(async (id, updates) => {
+    if (db) await db.collection("fileItems").doc(id).update(updates);
+    else setFileItems(prev => prev.map(i => i.id === id ? { ...i, ...updates } : i));
+  }, []);
+
+  const deleteFileItem = useCallback(async (id) => {
+    if (db) await db.collection("fileItems").doc(id).delete();
+    else setFileItems(prev => prev.filter(i => i.id !== id));
+  }, []);
+
   const createProject = useCallback(async (emoji) => {
     const data = { title: "Untitled", emoji, content: "", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     if (db) {
@@ -1234,7 +1719,7 @@ function App() {
     else setProjects(prev => prev.filter(p => p.id !== projectId));
   }, []);
 
-  const ctx = { cards, users, projects, view, setView, darkMode, setDarkMode, saveCard, deleteCard, moveCard, addUser, removeUser, createProject, updateProject, deleteProject, activeDragId, setActiveDragId };
+  const ctx = { cards, users, projects, fileTypes, fileItems, view, setView, darkMode, setDarkMode, saveCard, deleteCard, moveCard, addUser, removeUser, createProject, updateProject, deleteProject, createFileType, createFileItem, updateFileItem, deleteFileItem, activeDragId, setActiveDragId };
 
   return (
     <AppContext.Provider value={ctx}>
@@ -1243,6 +1728,7 @@ function App() {
         {view.type === 'board'    && <BoardPage />}
         {view.type === 'projects' && <ProjectsOverview />}
         {view.type === 'project'  && <ProjectEditor projectId={view.projectId} />}
+        {view.type === 'files'    && <FilesView />}
       </div>
     </AppContext.Provider>
   );
