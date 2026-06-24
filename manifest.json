@@ -1,0 +1,14 @@
+{
+  "name": "Fake Notion",
+  "short_name": "Fake Notion",
+  "description": "Team kanban board, project docs, and file links",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#ffffff",
+  "theme_color": "#1e293b",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

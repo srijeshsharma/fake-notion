@@ -2,8 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Fake Notion</title>
+
+  <!-- PWA manifest -->
+  <link rel="manifest" href="manifest.json" />
+
+  <!-- iOS home screen -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Fake Notion" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+
+  <!-- Theme colour for browser chrome -->
+  <meta name="theme-color" content="#1e293b" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -38,6 +50,11 @@
   </script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    /* iOS safe area + viewport height fix */
+    :root { --sat: env(safe-area-inset-top); --sab: env(safe-area-inset-bottom); }
+    html { height: -webkit-fill-available; }
+    body { min-height: -webkit-fill-available; padding-top: var(--sat); padding-bottom: var(--sab); }
+    .h-screen { height: 100svh !important; } /* svh = excludes iOS browser chrome */
     * { scrollbar-width: thin; scrollbar-color: #d1d1d1 transparent; }
     *::-webkit-scrollbar { width: 6px; height: 6px; }
     *::-webkit-scrollbar-thumb { background: #d1d1d1; border-radius: 3px; }
@@ -471,22 +488,26 @@ function CardItem({ card, onEdit, onDragStart }) {
     : ""
     : "";
 
+  function startDrag(clientX, clientY, currentTarget) {
+    if (currentTarget.closest('[data-edit-btn]')) return;
+    const rect = currentTarget.closest('[draggable="false"],[class*="rounded-2xl"]')?.getBoundingClientRect()
+               || currentTarget.getBoundingClientRect();
+    onDragStart({ card, startX: rect.left, startY: rect.top, width: rect.width,
+                  offsetX: clientX - rect.left, offsetY: clientY - rect.top,
+                  x: clientX, y: clientY });
+  }
+
   function handleMouseDown(e) {
     if (e.button !== 0) return;
-    // Don't start drag if clicking the edit button
     if (e.target.closest('[data-edit-btn]')) return;
     e.preventDefault();
-    const rect = e.currentTarget.getBoundingClientRect();
-    onDragStart({
-      card,
-      startX: rect.left,
-      startY: rect.top,
-      width: rect.width,
-      offsetX: e.clientX - rect.left,
-      offsetY: e.clientY - rect.top,
-      x: e.clientX,
-      y: e.clientY,
-    });
+    startDrag(e.clientX, e.clientY, e.currentTarget);
+  }
+
+  function handleTouchStart(e) {
+    if (e.target.closest('[data-edit-btn]')) return;
+    const t = e.touches[0];
+    startDrag(t.clientX, t.clientY, e.currentTarget);
   }
 
   return (
@@ -495,6 +516,7 @@ function CardItem({ card, onEdit, onDragStart }) {
         ${dueTint || "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"}
         ${isDragging ? "opacity-30 pointer-events-none" : "cursor-grab active:cursor-grabbing"}`}
       onMouseDown={handleMouseDown}
+      onTouchStart={handleTouchStart}
     >
       <div className="hover-handle absolute -left-5 top-1/2 -translate-y-1/2 p-0.5 text-notion-muted cursor-grab">
         <Icon d={IC.grip} size={14} />
@@ -1600,11 +1622,29 @@ function BoardPage() {
       }
     }
 
+    // Touch equivalents for iOS
+    function onTouchMove(e) {
+      if (drag.snapping) return;
+      e.preventDefault(); // prevent page scroll while dragging
+      const t = e.touches[0];
+      const colId = getColumnAtPoint(t.clientX, t.clientY);
+      setHoveredColumnId(colId);
+      setDrag(prev => prev && !prev.snapping ? { ...prev, x: t.clientX, y: t.clientY } : prev);
+    }
+    function onTouchEnd(e) {
+      const t = e.changedTouches[0];
+      onUp({ clientX: t.clientX, clientY: t.clientY });
+    }
+
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
+    window.addEventListener('touchmove', onTouchMove, { passive: false });
+    window.addEventListener('touchend', onTouchEnd);
     return () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onTouchEnd);
     };
   }, [drag]);
 
@@ -1815,6 +1855,13 @@ root.render(<App />);
     var out = Babel.transform(src, { presets: [['react', { runtime: 'classic' }], 'env'] });
     eval(out.code);
   });
+</script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    });
+  }
 </script>
 </body>
 </html>
